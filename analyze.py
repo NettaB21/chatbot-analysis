@@ -71,10 +71,11 @@ def load_conversations():
     # Read the CSV into a pandas DataFrame (a spreadsheet-like table in memory)
     import gspread
     from google.oauth2 import service_account
-    creds = service_account.Credentials.from_service_account_file(
-        "credentials.json",
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    )
+    import json, os
+creds = service_account.Credentials.from_service_account_info(
+    json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"]),
+    scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(config.GOOGLE_SHEET_ID)
     worksheet = sh.worksheet(config.GOOGLE_SHEET_TAB)
