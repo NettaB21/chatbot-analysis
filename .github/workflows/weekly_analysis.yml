@@ -27,4 +27,5 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
           GOOGLE_CREDENTIALS_FILE: credentials.json
+          GOOGLE_SHEET_LOG_ID: ${{ secrets.GOOGLE_SHEET_LOG_ID }}
         run: python analyze.py
