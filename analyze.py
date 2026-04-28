@@ -441,9 +441,19 @@ def upload_to_google_drive(file_path, folder_id, credentials_file):
     service = build("drive", "v3", credentials=creds)
 
     file_name = f"Chatbot Weekly Analysis — {datetime.now().strftime('%b %d %Y')}"
-    file_metadata = {"name": file_name, "parents": [folder_id], "mimeType": "application/vnd.google-apps.document"}
+    file_metadata = {
+        "name": file_name,
+        "parents": [folder_id],
+        "mimeType": "application/vnd.google-apps.document"
+    }
     media = MediaFileUpload(file_path, mimetype="text/html")
-    service.files().create(body=file_metadata, media_body=media).execute()
+    file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    file_id = file.get("id")
+    service.permissions().create(
+        fileId=file_id,
+        body={"role": "owner", "type": "user", "emailAddress": "YOUR_GOOGLE_EMAIL"},
+        transferOwnership=True
+    ).execute()
     print(f"Report uploaded to Google Drive: {file_name}")
 
 
