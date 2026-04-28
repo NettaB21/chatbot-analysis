@@ -73,7 +73,7 @@ def load_conversations():
     from google.oauth2 import service_account
     import json, os
     creds = service_account.Credentials.from_service_account_info(
-        json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"]),
+        json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"]),
         scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
     )
     gc = gspread.authorize(creds)
