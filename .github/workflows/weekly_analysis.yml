@@ -3,7 +3,7 @@ name: Weekly Chatbot Analysis
 on:
   schedule:
     - cron: '0 17 * * 1'  # Every Monday at 9AM PT (17:00 UTC)
-  workflow_dispatch:       # Allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -18,9 +18,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Write Google credentials
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+
       - name: Run analysis
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_CREDENTIALS_FILE: credentials.json
         run: python analyze.py

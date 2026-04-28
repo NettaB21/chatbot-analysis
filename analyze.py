@@ -69,7 +69,17 @@ def load_conversations():
     log.info(f"Analyzing window: {start.strftime('%a %b %d %Y %H:%M')} → {end.strftime('%a %b %d %Y %H:%M')} ({config.TIMEZONE})")
 
     # Read the CSV into a pandas DataFrame (a spreadsheet-like table in memory)
-    df = pd.read_csv(config.SOURCE_FILE)
+    import gspread
+    from google.oauth2 import service_account
+    creds = service_account.Credentials.from_service_account_file(
+        "credentials.json",
+        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    )
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(config.GOOGLE_SHEET_ID)
+    worksheet = sh.worksheet(config.GOOGLE_SHEET_TAB)
+    records = worksheet.get_all_records()
+    df = pd.DataFrame(records)
 
     # Parse the 'created_at' column as real timestamps.
     # format='ISO8601' handles rows with or without milliseconds gracefully.
