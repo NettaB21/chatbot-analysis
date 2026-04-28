@@ -68,10 +68,8 @@ def load_conversations():
     start, end = get_weekly_window()
     log.info(f"Analyzing window: {start.strftime('%a %b %d %Y %H:%M')} → {end.strftime('%a %b %d %Y %H:%M')} ({config.TIMEZONE})")
 
-    # Read the CSV into a pandas DataFrame (a spreadsheet-like table in memory)
     import gspread
     from google.oauth2 import service_account
-    import json, os
     creds = service_account.Credentials.from_service_account_file(
         os.environ["GOOGLE_CREDENTIALS_FILE"],
         scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
@@ -83,9 +81,6 @@ def load_conversations():
     df = pd.DataFrame(records)
 
     # Parse the 'created_at' column as real timestamps.
-    # format='ISO8601' handles rows with or without milliseconds gracefully.
-    # Timestamps have no timezone info, so we mark them UTC (standard for DB exports)
-    # then convert to local time for filtering.
     df["created_at"] = pd.to_datetime(df["created_at"], format="ISO8601", utc=True).dt.tz_convert(config.TIMEZONE)
 
     # Keep only rows that fall inside the weekly window
@@ -115,8 +110,6 @@ def load_conversations():
 
 # ─── Step 3: Classification prompt sent to Claude ────────────────────────────
 
-# This is the exact instruction we send to Claude for each batch of conversations.
-# The double curly braces {{ }} are how Python includes a literal { } in a template string.
 CLASSIFICATION_PROMPT = """\
 You are analyzing conversations from an immigration services chatbot.
 Classify each conversation below on all dimensions listed. Return ONLY a valid JSON array \
@@ -157,14 +150,10 @@ Classification rules:
 # ─── Step 4: Send a batch to Claude and get back classifications ──────────────
 
 def classify_batch(client, conversations):
-    """
-    Sends up to BATCH_SIZE conversations to Claude and returns a list of
-    classification dicts. Tries twice if the first attempt fails.
-    """
     batch_text = "\n\n".join(c["text"] for c in conversations)
     prompt = CLASSIFICATION_PROMPT.format(batch_text=batch_text)
 
-    for attempt in range(1, 3):  # try at most twice
+    for attempt in range(1, 3):
         try:
             response = client.messages.create(
                 model=config.ANTHROPIC_MODEL,
@@ -173,7 +162,6 @@ def classify_batch(client, conversations):
             )
             raw = response.content[0].text.strip()
 
-            # Claude sometimes wraps JSON in ```json ... ``` — strip that out
             if raw.startswith("```"):
                 parts = raw.split("```")
                 raw = parts[1].lstrip("json").strip() if len(parts) > 1 else raw
@@ -204,7 +192,6 @@ REQUIRED_FIELDS = [
 ]
 
 def validate(obj):
-    """Fill any fields that Claude may have accidentally omitted with None."""
     for field in REQUIRED_FIELDS:
         obj.setdefault(field, None)
     return obj
@@ -213,7 +200,6 @@ def validate(obj):
 # ─── Step 6: Aggregate counts and percentages across all conversations ────────
 
 def pct_breakdown(values):
-    """Returns {value: {count, pct}} for every distinct value in the list."""
     total = len(values)
     if total == 0:
         return {}
@@ -227,7 +213,6 @@ def pct_breakdown(values):
     }
 
 def top5_counts(values):
-    """Returns the top 5 non-null values and their counts, sorted by frequency."""
     counts = {}
     for v in values:
         if v and v not in ("None", "null", "unclear"):
@@ -235,7 +220,6 @@ def top5_counts(values):
     return dict(sorted(counts.items(), key=lambda x: -x[1])[:5])
 
 def aggregate_metrics(classified):
-    """Builds the full metrics dictionary from all classified conversations."""
     n = len(classified)
 
     def vals(field):
@@ -267,15 +251,10 @@ def aggregate_metrics(classified):
 # ─── Step 7: Build data-driven recommended actions ────────────────────────────
 
 def build_recommendations(metrics):
-    """
-    Generates 5 recommended actions based on what the data actually shows.
-    These are tailored to the highest-impact issues found this week.
-    """
     b = metrics["breakdowns"]
     t = metrics["top5"]
     recs = []
 
-    # Recommendation based on legal risk
     legal_yes = b.get("legal_risk_flag", {}).get("yes", {})
     if legal_yes.get("count", 0) > 0:
         top_risk = next(iter(t["legal_risk_type"]), "unknown risk type")
@@ -284,7 +263,6 @@ def build_recommendations(metrics):
             f"({legal_yes['pct']}% of total) — top risk type: _{top_risk}_"
         )
 
-    # Recommendation based on human-in-loop opportunities
     hil = b.get("human_in_loop_value", {}).get("yes", {})
     if hil.get("count", 0) > 0:
         top_hil = next(iter(t["human_in_loop_category"]), "general")
@@ -293,7 +271,6 @@ def build_recommendations(metrics):
             f"({hil['pct']}% of conversations) — top category: _{top_hil}_"
         )
 
-    # Recommendation based on language mismatches
     lang_no = b.get("bot_language_match", {}).get("no", {})
     if lang_no.get("count", 0) > 0:
         recs.append(
@@ -301,7 +278,6 @@ def build_recommendations(metrics):
             f"users asked in one language and got a response in another"
         )
 
-    # Recommendation based on top conversion blocker
     top_blocker = next(iter(t["conversion_blocker"]), None)
     if top_blocker:
         recs.append(
@@ -309,7 +285,6 @@ def build_recommendations(metrics):
             f"update bot responses and FAQs to resolve this friction"
         )
 
-    # Recommendation based on top objection theme
     top_objection = next(iter(t["objection_topic"]), None)
     if top_objection:
         recs.append(
@@ -317,7 +292,6 @@ def build_recommendations(metrics):
             f"train the bot or add a human handoff trigger for this topic"
         )
 
-    # Fill up to 5 with generic high-value recommendations if needed
     fallbacks = [
         "Share this report with the product team and align on the top 3 bot improvements",
         "Update FAQ and bot knowledge base based on top trend themes this week",
@@ -334,12 +308,6 @@ def build_recommendations(metrics):
 # ─── Step 8: Write the three output files ────────────────────────────────────
 
 def write_outputs(classified, metrics, start, end):
-    """
-    Saves three files inside outputs/YYYY-MM-DD/:
-      - classified_conversations.csv  (one row per conversation)
-      - metrics.json                  (all counts and percentages)
-      - weekly_summary.md             (executive summary in plain language)
-    """
     date_str = start.strftime("%Y-%m-%d")
     out_dir = Path(config.OUTPUT_FOLDER) / date_str
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -420,44 +388,29 @@ _Generated by chatbot-analysis pipeline_
     return out_dir
 
 
- return out_dir
+# ─── Google Sheet log ─────────────────────────────────────────────────────────
 
-
-# ─── Google Drive upload ──────────────────────────────────────────────────────
-
-def upload_to_google_drive(file_path, folder_id, credentials_file):
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
+def upload_to_google_sheet_log(summary_path, sheet_id, credentials_file):
+    import gspread
     from google.oauth2 import service_account
-
     if not credentials_file or not os.path.exists(credentials_file):
-        print("No credentials file found — skipping Google Drive upload")
+        print("No credentials file found — skipping Google Sheet log")
         return
-    if not folder_id:
-        print("No GOOGLE_DRIVE_FOLDER_ID set — skipping Google Drive upload")
+    if not sheet_id:
+        print("No GOOGLE_SHEET_LOG_ID set — skipping Google Sheet log")
         return
-
     creds = service_account.Credentials.from_service_account_file(
         credentials_file,
-        scopes=["https://www.googleapis.com/auth/drive"]
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
     )
-    service = build("drive", "v3", credentials=creds)
-
-    file_name = f"Chatbot Weekly Analysis — {datetime.now().strftime('%b %d %Y')}"
-    file_metadata = {
-        "name": file_name,
-        "parents": [folder_id],
-        "mimeType": "application/vnd.google-apps.document"
-    }
-    media = MediaFileUpload(file_path, mimetype="text/html")
-    file = service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-    file_id = file.get("id")
-    service.permissions().create(
-        fileId=file_id,
-        body={"role": "owner", "type": "user", "emailAddress": "netta@fileright.com"},
-        transferOwnership=True
-    ).execute()
-    print(f"Report uploaded to Google Drive: {file_name}")
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(sheet_id)
+    worksheet = sh.sheet1
+    if worksheet.row_count == 1 and worksheet.acell("A1").value is None:
+        worksheet.append_row(["Date", "Summary"])
+    summary = Path(summary_path).read_text(encoding="utf-8")
+    worksheet.append_row([datetime.now().strftime("%Y-%m-%d"), summary])
+    print(f"Report logged to Google Sheet: {sheet_id}")
 
 
 # ─── Slack notification ───────────────────────────────────────────────────────
@@ -470,7 +423,6 @@ def send_slack_notification(summary_path, webhook_url):
         return
     with open(summary_path, 'r') as f:
         summary = f.read()
-    # Send headline message
     headline = summary[:2000]
     payload = json.dumps({"text": f"*Weekly Chatbot Analysis*\n{headline}"})
     req = urllib.request.Request(webhook_url, payload.encode(), {'Content-Type': 'application/json'})
@@ -481,12 +433,6 @@ def send_slack_notification(summary_path, webhook_url):
 # ─── Main entry point ─────────────────────────────────────────────────────────
 
 def main(limit=None):
-    """
-    Runs the full analysis pipeline.
-    Pass limit=10 to process only the first 10 conversations (useful for testing).
-    """
-
-    # Guard: make sure the API key is available before doing anything else
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit(
             "ERROR: ANTHROPIC_API_KEY not found.\n"
@@ -496,7 +442,6 @@ def main(limit=None):
 
     conversations, start, end = load_conversations()
 
-    # If the weekly window has no data, write a minimal summary and stop
     if not conversations:
         out_dir = Path(config.OUTPUT_FOLDER) / start.strftime("%Y-%m-%d")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -509,16 +454,13 @@ def main(limit=None):
         log.info(f"No data found — wrote empty summary to {out_dir}/")
         return
 
-    # Apply optional limit (used for test runs)
     if limit:
         log.info(f"Test mode: processing only the first {limit} conversations")
         conversations = conversations[:limit]
 
-    # Connect to the Anthropic API
     client = anthropic.Anthropic()
     classified = []
 
-    # Process conversations in batches to reduce API calls
     total_batches = (len(conversations) + config.BATCH_SIZE - 1) // config.BATCH_SIZE
     for i in range(0, len(conversations), config.BATCH_SIZE):
         batch_num = i // config.BATCH_SIZE + 1
@@ -541,39 +483,14 @@ def main(limit=None):
     send_slack_notification(f"{out_dir}/weekly_summary.md", webhook_url)
 
     credentials_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
-    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
+    sheet_log_id = os.getenv("GOOGLE_SHEET_LOG_ID", "")
     try:
-        def upload_to_google_sheet_log(summary_path, sheet_id, credentials_file):
-    import gspread
-    from google.oauth2 import service_account
-    if not credentials_file or not os.path.exists(credentials_file):
-        print("No credentials file found — skipping Google Sheet log")
-        return
-    if not sheet_id:
-        print("No GOOGLE_SHEET_LOG_ID set — skipping Google Sheet log")
-        return
-    creds = service_account.Credentials.from_service_account_file(
-        credentials_file,
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-    worksheet = sh.sheet1
-    if worksheet.row_count == 1 and worksheet.acell("A1").value is None:
-        worksheet.append_row(["Date", "Summary"])
-    summary = Path(summary_path).read_text(encoding="utf-8")
-    worksheet.append_row([datetime.now().strftime("%Y-%m-%d"), summary])
-    print(f"Report logged to Google Sheet: {sheet_id}")
-
-if __name__ == "__main__":
-    # To run a quick test on 10 conversations: python analyze.py --test
-    import sys
-    test_mode = "--test" in sys.argv
-    main(limit=10 if test_mode else None)
+        upload_to_google_sheet_log(f"{out_dir}/weekly_summary.md", sheet_log_id, credentials_file)
+    except Exception as e:
+        log.warning(f"Google Sheet log failed: {e}")
 
 
 if __name__ == "__main__":
-    # To run a quick test on 10 conversations: python analyze.py --test
     import sys
     test_mode = "--test" in sys.argv
     main(limit=10 if test_mode else None)
