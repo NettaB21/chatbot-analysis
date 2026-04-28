@@ -72,10 +72,10 @@ def load_conversations():
     import gspread
     from google.oauth2 import service_account
     import json, os
-creds = service_account.Credentials.from_service_account_info(
-    json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"]),
-    scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-)
+    creds = service_account.Credentials.from_service_account_info(
+        json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"]),
+        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+    )
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(config.GOOGLE_SHEET_ID)
     worksheet = sh.worksheet(config.GOOGLE_SHEET_TAB)
