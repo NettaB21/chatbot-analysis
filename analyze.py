@@ -451,7 +451,7 @@ def upload_to_google_drive(file_path, folder_id, credentials_file):
     file_id = file.get("id")
     service.permissions().create(
         fileId=file_id,
-        body={"role": "owner", "type": "user", "emailAddress": "YOUR_GOOGLE_EMAIL"},
+        body={"role": "owner", "type": "user", "emailAddress": "netta@fileright.com"},
         transferOwnership=True
     ).execute()
     print(f"Report uploaded to Google Drive: {file_name}")
