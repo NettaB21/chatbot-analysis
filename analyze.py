@@ -405,13 +405,35 @@ def upload_to_google_sheet_log(summary_path, sheet_id, credentials_file):
     )
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(sheet_id)
-    worksheet = sh.sheet1
-    if worksheet.row_count == 1 and worksheet.acell("A1").value is None:
-        worksheet.append_row(["Date", "Summary"])
-    summary = Path(summary_path).read_text(encoding="utf-8")
-    worksheet.append_row([datetime.now().strftime("%Y-%m-%d"), summary])
-    print(f"Report logged to Google Sheet: {sheet_id}")
 
+    # ── Tab 1: Weekly summary log ──
+    try:
+        summary_ws = sh.worksheet("Weekly Summary")
+    except:
+        summary_ws = sh.add_worksheet(title="Weekly Summary", rows=1000, cols=2)
+    if not summary_ws.get_all_values():
+        summary_ws.append_row(["Date", "Summary"])
+    summary = Path(summary_path).read_text(encoding="utf-8")
+    summary_ws.append_row([datetime.now().strftime("%Y-%m-%d"), summary])
+
+    # ── Tab 2: Conversation detail ──
+    csv_path = Path(summary_path).parent / "classified_conversations.csv"
+    if csv_path.exists():
+        try:
+            detail_ws = sh.worksheet("Conversation Detail")
+        except:
+            detail_ws = sh.add_worksheet(title="Conversation Detail", rows=10000, cols=20)
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        if rows:
+            if not detail_ws.get_all_values():
+                detail_ws.append_row(list(rows[0].keys()))
+            run_date = datetime.now().strftime("%Y-%m-%d")
+            for row in rows:
+                detail_ws.append_row([run_date] + list(row.values()))
+
+    print(f"Report logged to Google Sheet: {sheet_id}")
 
 # ─── Slack notification ───────────────────────────────────────────────────────
 
